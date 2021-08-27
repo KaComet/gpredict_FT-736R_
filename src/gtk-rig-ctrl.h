@@ -10,6 +10,7 @@
 #include "radio-conf.h"
 #include "sgpsdp/sgp4sdp4.h"
 #include "trsp-conf.h"
+#include "radio-conf.h"
 
 
 #define GTK_TYPE_RIG_CTRL          (gtk_rig_ctrl_get_type ())
@@ -37,6 +38,8 @@ struct _gtk_rig_ctrl {
     GtkWidget      *SatDopUp;   /*!< Doppler shift up */
     GtkWidget      *LoDown;     /*!< LO of downconverter */
     GtkWidget      *LoUp;       /*!z LO of upconverter */
+    GtkWidget      *ModeUp;     /*!< TX Mode selector */
+    GtkWidget      *ModeDown;   /*!< RX Mode selector */
 
     /* target status labels */
     GtkWidget      *SatAz, *SatEl, *SatCnt;
