@@ -67,13 +67,18 @@ typedef struct {
     gdouble         loup;       /*!< local oscillator freq in Hz for uplink. */
     rig_type_t      type;       /*!< Radio type */
     ptt_type_t      ptt;        /*!< PTT type (needed for RX, TX, and TRX) */
+    GList          *modesTX;    /*!< Modes that can be used for TX */
+    GList          *modesRX;    /*!< Modes that can be used for RX */
+    guint           currentTXmode;  /*!< The current mode used for TX (index of modesTX) */
+    guint           currentRXmode;  /*!< The current mode used for TX (index of modesRX) */
+    gboolean        modeRXChanged; /*!< True if the TX mode has been changed. Set to false after the radio has been updated */
+    gboolean        modeTXChanged; /*!< True if the TX mode has been changed. Set to false after the radio has been updated */
     vfo_t           vfoDown;    /*!< Downlink VFO for full-duplex radios */
     vfo_t           vfoUp;      /*!< Uplink VFO for full-duplex radios */
 
     gboolean        signal_aos; /*!< Send AOS notification to RIG */
     gboolean        signal_los; /*!< Send LOS notification to RIG */
 } radio_conf_t;
-
 
 gboolean        radio_conf_read(radio_conf_t * conf);
 void            radio_conf_save(radio_conf_t * conf);

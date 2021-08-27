@@ -78,12 +78,16 @@ static void     exec_dual_rig_cycle(GtkRigCtrl * ctrl);
 static gboolean check_aos_los(GtkRigCtrl * ctrl);
 static gboolean set_freq_simplex(GtkRigCtrl * ctrl, gint sock, gdouble freq);
 static gboolean get_freq_simplex(GtkRigCtrl * ctrl, gint sock, gdouble * freq);
+static GList *get_rx_modes(GtkRigCtrl * ctrl, gint sock);
+static GList *get_tx_modes(GtkRigCtrl * ctrl, gint sock);
 static gboolean set_freq_toggle(GtkRigCtrl * ctrl, gint sock, gdouble freq);
 static gboolean set_toggle(GtkRigCtrl * ctrl, gint sock);
 static gboolean unset_toggle(GtkRigCtrl * ctrl, gint sock);
 static gboolean get_freq_toggle(GtkRigCtrl * ctrl, gint sock, gdouble * freq);
 static gboolean get_ptt(GtkRigCtrl * ctrl, gint sock);
 static gboolean set_ptt(GtkRigCtrl * ctrl, gint sock, gboolean ptt);
+static void rx_mode_changed_cb(GtkComboBox * box, gpointer data);
+static void tx_mode_changed_cb(GtkComboBox * box, gpointer data);
 
 /*  add thread for hamlib communication */
 gpointer        rigctl_run(gpointer data);
@@ -118,13 +122,20 @@ static void gtk_rig_ctrl_destroy(GtkWidget * widget)
         radio_conf_save(ctrl->conf);
         g_free(ctrl->conf->name);
         g_free(ctrl->conf->host);
+        //TODO
+        //g_list_free_full(ctrl->conf->modesTX, g_free);
+        //g_list_free_full(ctrl->conf->modesRX, g_free);
         g_free(ctrl->conf);
         ctrl->conf = NULL;
     }
+
     if (ctrl->conf2 != NULL)
     {
         g_free(ctrl->conf2->name);
         g_free(ctrl->conf2->host);
+        //TODO
+        //g_list_free_full(ctrl->conf2->modesTX, g_free);
+        //g_list_free_full(ctrl->conf2->modesRX, g_free);
         g_free(ctrl->conf2);
         ctrl->conf2 = NULL;
     }
@@ -446,7 +457,7 @@ static GtkWidget *create_downlink_widgets(GtkRigCtrl * ctrl)
 {
     GtkWidget      *frame;
     GtkWidget      *vbox;
-    GtkWidget      *hbox1, *hbox2;
+    GtkWidget      *hbox1, *hbox2, *hbox3;
     GtkWidget      *label;
 
     label = gtk_label_new(NULL);
@@ -459,6 +470,7 @@ static GtkWidget *create_downlink_widgets(GtkRigCtrl * ctrl)
     gtk_container_set_border_width(GTK_CONTAINER(vbox), 10);
     hbox1 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     hbox2 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    hbox3 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
 
     /* satellite downlink frequency */
     ctrl->SatFreqDown = gtk_freq_knob_new(145890000.0, TRUE);
@@ -495,9 +507,18 @@ static GtkWidget *create_downlink_widgets(GtkRigCtrl * ctrl)
     ctrl->RigFreqDown = gtk_freq_knob_new(145890000.0, FALSE);
     gtk_box_pack_start(GTK_BOX(hbox2), ctrl->RigFreqDown, TRUE, TRUE, 0);
 
+    g_object_set(label, "xalign", 1.0f, "yalign", 0.5f, NULL);
+    ctrl->ModeDown = gtk_combo_box_text_new();
+
+    gtk_widget_set_tooltip_text(ctrl->ModeDown, _("Select downlink mode."));
+    gtk_combo_box_set_active(GTK_COMBO_BOX(ctrl->ModeDown), 0);
+    gtk_box_pack_start(GTK_BOX(hbox3), ctrl->ModeDown, TRUE, TRUE, 0);
+    g_signal_connect(ctrl->ModeDown, "changed", G_CALLBACK(rx_mode_changed_cb), ctrl);
+
     /* finish packing ... */
     gtk_box_pack_start(GTK_BOX(vbox), hbox1, TRUE, TRUE, 10);
     gtk_box_pack_start(GTK_BOX(vbox), hbox2, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(vbox), hbox3, TRUE, TRUE, 0);
     gtk_container_add(GTK_CONTAINER(frame), vbox);
 
     return frame;
@@ -513,7 +534,7 @@ static GtkWidget *create_uplink_widgets(GtkRigCtrl * ctrl)
 {
     GtkWidget      *frame;
     GtkWidget      *vbox;
-    GtkWidget      *hbox1, *hbox2;
+    GtkWidget      *hbox1, *hbox2, *hbox3;
     GtkWidget      *label;
 
     label = gtk_label_new(NULL);
@@ -526,6 +547,7 @@ static GtkWidget *create_uplink_widgets(GtkRigCtrl * ctrl)
     gtk_container_set_border_width(GTK_CONTAINER(vbox), 10);
     hbox1 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     hbox2 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    hbox3 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
 
     /* satellite uplink frequency */
     ctrl->SatFreqUp = gtk_freq_knob_new(145890000.0, TRUE);
@@ -562,8 +584,17 @@ static GtkWidget *create_uplink_widgets(GtkRigCtrl * ctrl)
     ctrl->RigFreqUp = gtk_freq_knob_new(145890000.0, FALSE);
     gtk_box_pack_start(GTK_BOX(hbox2), ctrl->RigFreqUp, TRUE, TRUE, 0);
 
+    g_object_set(label, "xalign", 1.0f, "yalign", 0.5f, NULL);
+    ctrl->ModeUp = gtk_combo_box_text_new();
+
+    gtk_widget_set_tooltip_text(ctrl->ModeUp, _("Select uplink mode."));
+    gtk_combo_box_set_active(GTK_COMBO_BOX(ctrl->ModeUp), 0);
+    gtk_box_pack_start(GTK_BOX(hbox3), ctrl->ModeUp, TRUE, TRUE, 0);
+    g_signal_connect(ctrl->ModeUp, "changed", G_CALLBACK(tx_mode_changed_cb), ctrl);
+
     gtk_box_pack_start(GTK_BOX(vbox), hbox1, TRUE, TRUE, 10);
     gtk_box_pack_start(GTK_BOX(vbox), hbox2, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(vbox), hbox3, TRUE, TRUE, 0);
     gtk_container_add(GTK_CONTAINER(frame), vbox);
 
     return frame;
@@ -872,6 +903,32 @@ static void primary_rig_selected_cb(GtkComboBox * box, gpointer data)
         g_free(ctrl->conf);
         ctrl->conf = NULL;
     }
+}
+
+// Called when the mode selected by the TX mode dropdown has been changed.
+static void tx_mode_changed_cb(GtkComboBox * box, gpointer data)
+{
+    GtkRigCtrl     *ctrl = GTK_RIG_CTRL(data);
+
+    //TODO: Add support for something other than split-mode.
+    if (ctrl && ctrl->conf) {
+        ctrl->conf->currentTXmode = gtk_combo_box_get_active(box);
+        ctrl->conf->modeTXChanged = TRUE;
+    }
+
+}
+
+// Called when the mode selected by the RX mode dropdown has been changed.
+static void rx_mode_changed_cb(GtkComboBox * box, gpointer data)
+{
+    GtkRigCtrl     *ctrl = GTK_RIG_CTRL(data);
+
+    //TODO: Add support for something other than split-mode.
+    if (ctrl && ctrl->conf) {
+            ctrl->conf->currentRXmode = gtk_combo_box_get_active(box);
+            ctrl->conf->modeRXChanged = TRUE;
+    }
+
 }
 
 static void secondary_rig_selected_cb(GtkComboBox * box, gpointer data)
@@ -1489,12 +1546,52 @@ static inline gboolean check_get_response(gchar * buffback, gboolean retcode,
     return retcode;
 }
 
+// Sets up the RX mode dropdown selector with the modes supported by the radio.
+static void setupRXSelector(GtkRigCtrl * ctrl) {
+    gint newIndex = -1;
+    gchar *prevActive = g_strdup(gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(ctrl->ModeDown)));
+    gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(ctrl->ModeDown));
+
+    ctrl->conf->modesRX = get_rx_modes(ctrl, ctrl->sock);
+    for (guint i = 0; i < g_list_length(ctrl->conf->modesRX); i++) {
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(ctrl->ModeDown), g_list_nth_data(ctrl->conf->modesRX, i));
+
+        if (!g_strcmp0(g_list_nth_data(ctrl->conf->modesRX, i), prevActive))
+            newIndex = (gint)i;
+    }
+    gtk_combo_box_set_active((GtkComboBox *) ctrl->ModeDown, newIndex);
+    g_free(prevActive);
+}
+
+// Sets up the TX mode dropdown selector with the modes supported by the radio.
+static void setupTXSelector(GtkRigCtrl * ctrl) {
+    gint newIndex = -1;
+    gchar *prevActive = g_strdup(gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(ctrl->ModeUp)));
+    gtk_combo_box_text_remove_all(GTK_COMBO_BOX_TEXT(ctrl->ModeUp));
+
+    ctrl->conf->modesTX = get_tx_modes(ctrl, ctrl->sock);
+    for (guint i = 0; i < g_list_length(ctrl->conf->modesTX); i++) {
+        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(ctrl->ModeUp), g_list_nth_data(ctrl->conf->modesTX, i));
+
+        if (!g_strcmp0(g_list_nth_data(ctrl->conf->modesTX, i), prevActive))
+            newIndex = (gint)i;
+    }
+    gtk_combo_box_set_active((GtkComboBox *) ctrl->ModeUp, newIndex);
+    g_free(prevActive);
+}
+
 /* Setup VFOs for split operation (simplex or duplex) */
 static gboolean setup_split(GtkRigCtrl * ctrl)
 {
     gchar          *buff;
     gchar           buffback[256];
     gboolean        retcode;
+
+    // Get the supported TX and RX modes from the radio.
+    if (ctrl->conf) {
+        setupRXSelector(ctrl);
+        setupTXSelector(ctrl);
+    }
 
     switch (ctrl->conf->vfoUp)
     {
@@ -1552,10 +1649,54 @@ static gboolean rig_ctrl_timeout_cb(gpointer data)
     return TRUE;
 }
 
+/*
+ * Set the radio's RX mode. Intended for use with split-mode radios.
+ *
+ * Returns TRUE if the operation was successful, FALSE otherwise
+ */
+static gboolean set_split_rx_mode(GtkRigCtrl * ctrl, gint sock)
+{
+    gchar          *buff;
+    gchar           buffback[128];
+    gboolean        retcode;
+
+    buff = g_strdup_printf("M %s 0\x0a", (gchar*) g_list_nth_data(ctrl->conf->modesRX, ctrl->conf->currentRXmode));
+    retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
+    g_free(buff);
+
+    return (check_set_response(buffback, retcode, __func__));
+}
+
+/*
+ * Set the radio's TX mode. Intended for use with split-mode radios.
+ *
+ * Returns TRUE if the operation was successful, FALSE otherwise
+ */
+static gboolean set_tx_split_mode(GtkRigCtrl * ctrl, gint sock)
+{
+    gchar          *buff;
+    gchar           buffback[128];
+    gboolean        retcode;
+
+    buff = g_strdup_printf("X %s 0\x0a", (gchar*) g_list_nth_data(ctrl->conf->modesTX, ctrl->conf->currentTXmode));
+    retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
+    g_free(buff);
+
+    return (check_set_response(buffback, retcode, __func__));
+}
+
 static void exec_rx_cycle(GtkRigCtrl * ctrl)
 {
     gdouble         readfreq = 0.0, tmpfreq, satfreqd, satfrequ;
     gboolean        ptt = FALSE;
+
+    if (ctrl->conf->modeRXChanged) {
+        sat_log_log(SAT_LOG_LEVEL_DEBUG,
+                    _("%s: Setting RX mode to %u"),
+                    __func__, ctrl->conf->currentRXmode);
+        ctrl->conf->modeRXChanged = FALSE;
+        set_split_rx_mode(ctrl, ctrl->sock);
+    }
 
     /* get PTT status */
     if (ctrl->engaged && ctrl->conf->ptt)
@@ -1891,6 +2032,14 @@ static void exec_duplex_tx_cycle(GtkRigCtrl * ctrl)
 {
     gdouble         readfreq = 0.0, tmpfreq, satfreqd, satfrequ;
     gboolean        dialchanged = FALSE;
+
+    if (ctrl->conf->modeTXChanged) {
+        sat_log_log(SAT_LOG_LEVEL_DEBUG,
+                    _("%s: Setting TX mode to %u"),
+                    __func__, ctrl->conf->currentTXmode);
+        ctrl->conf->modeTXChanged = FALSE;
+        set_tx_split_mode(ctrl, ctrl->sock);
+    }
 
     /* Dial feedback:
        If radio device is engaged read frequency from radio and compare it to the
@@ -2462,6 +2611,80 @@ static gboolean get_freq_simplex(GtkRigCtrl * ctrl, gint sock, gdouble * freq)
 }
 
 /*
+ * Get modes
+ *
+ * Returns a list of modes available for RX.
+ */
+static GList *get_rx_modes(GtkRigCtrl * ctrl, gint sock)
+{
+    gchar          *buff, **vbuff;
+    gchar           buffback[128];
+    gboolean        retcode;
+    GList          *result = NULL;
+
+    buff = g_strdup_printf("M ?\x0a");
+    retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
+    if (retcode) {
+        sat_log_log(SAT_LOG_LEVEL_DEBUG,_("Got for RX modes: %s"), buffback);
+
+        vbuff = g_strsplit(buffback, " ", 128);
+
+        gchar **currentPtr = vbuff;
+        for (unsigned int i = 0; i < 128; i++) {
+            if ((currentPtr[i] == NULL) || (currentPtr[i][0] == '\n') || (currentPtr[i][0] == '\r'))
+                break;
+
+            result = g_list_append(result, g_strdup(currentPtr[i]));
+        }
+
+        g_strfreev(vbuff);
+    } else {
+        sat_log_log(SAT_LOG_LEVEL_ERROR,_("Could not get RX modes. Got %s"), buffback);
+    }
+
+    g_free(buff);
+
+    return result;
+}
+
+/*
+ * Get modes
+ *
+ * Returns a list of modes available for TX.
+ */
+static GList *get_tx_modes(GtkRigCtrl * ctrl, gint sock)
+{
+    gchar          *buff, **vbuff;
+    gchar           buffback[128];
+    gboolean        retcode;
+    GList          *result = NULL;
+
+    buff = g_strdup_printf("X ?\x0a");
+    retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
+    if (retcode) {
+        sat_log_log(SAT_LOG_LEVEL_DEBUG,_("Got for TX modes: %s"), buffback);
+
+        vbuff = g_strsplit(buffback, " ", 128);
+
+        gchar **currentPtr = vbuff;
+        for (unsigned int i = 0; i < 128; i++) {
+            if ((currentPtr[i] == NULL) || (currentPtr[i][0] == '\n') || (currentPtr[i][0] == '\r'))
+                break;
+
+            result = g_list_append(result, g_strdup(currentPtr[i]));
+        }
+
+        g_strfreev(vbuff);
+    } else {
+        sat_log_log(SAT_LOG_LEVEL_ERROR,_("Could not get TX modes. Got %s"), buffback);
+    }
+
+    g_free(buff);
+
+    return result;
+}
+
+/*
  * Get frequency when the radio is working toggle
  *
  * Returns TRUE if the operation was successful, FALSE otherwise
@@ -2729,6 +2952,9 @@ static void rigctrl_open(GtkRigCtrl * data)
     start_timer(ctrl);
 
     open_rigctld_socket(ctrl->conf, &(ctrl->sock));
+
+    sat_log_log(SAT_LOG_LEVEL_INFO,
+                _("%s:%d: Opening"), __FILE__, __LINE__);
 
     /* set initial frequency */
     if (ctrl->conf2 != NULL)
