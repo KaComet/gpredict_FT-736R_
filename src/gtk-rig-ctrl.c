@@ -2622,7 +2622,7 @@ static GList *get_rx_modes(GtkRigCtrl * ctrl, gint sock)
     gboolean        retcode;
     GList          *result = NULL;
 
-    buff = g_strdup_printf("M?\x0a");
+    buff = g_strdup_printf("M ?\x0a");
     retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
     if (retcode) {
         sat_log_log(SAT_LOG_LEVEL_DEBUG,_("Got for RX modes: %s"), buffback);
