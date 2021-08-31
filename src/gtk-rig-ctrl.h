@@ -105,6 +105,12 @@ struct _GtkRigCtrlClass {
     GtkVBoxClass    parent_class;
 };
 
+typedef enum {
+    HLR_SUCCESS,
+    HLR_ERROR,
+    HLR_NOT_SUPPORTED
+} HamLibResponse;
+
 GType           gtk_rig_ctrl_get_type(void);
 GtkWidget      *gtk_rig_ctrl_new(GtkSatModule * module);
 void            gtk_rig_ctrl_update(GtkRigCtrl * ctrl, gdouble t);

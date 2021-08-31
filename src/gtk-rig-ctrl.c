@@ -77,13 +77,13 @@ static void     exec_duplex_tx_cycle(GtkRigCtrl * ctrl);
 static void     exec_dual_rig_cycle(GtkRigCtrl * ctrl);
 static gboolean check_aos_los(GtkRigCtrl * ctrl);
 static gboolean set_freq_simplex(GtkRigCtrl * ctrl, gint sock, gdouble freq);
-static gboolean get_freq_simplex(GtkRigCtrl * ctrl, gint sock, gdouble * freq);
+static HamLibResponse get_freq_simplex(GtkRigCtrl * ctrl, gint sock, gdouble * freq);
 static GList *get_rx_modes(GtkRigCtrl * ctrl, gint sock);
 static GList *get_tx_modes(GtkRigCtrl * ctrl, gint sock);
 static gboolean set_freq_toggle(GtkRigCtrl * ctrl, gint sock, gdouble freq);
 static gboolean set_toggle(GtkRigCtrl * ctrl, gint sock);
 static gboolean unset_toggle(GtkRigCtrl * ctrl, gint sock);
-static gboolean get_freq_toggle(GtkRigCtrl * ctrl, gint sock, gdouble * freq);
+static HamLibResponse get_freq_toggle(GtkRigCtrl * ctrl, gint sock, gdouble * freq);
 static gboolean get_ptt(GtkRigCtrl * ctrl, gint sock);
 static gboolean set_ptt(GtkRigCtrl * ctrl, gint sock, gboolean ptt);
 static void rx_mode_changed_cb(GtkComboBox * box, gpointer data);
@@ -1055,6 +1055,15 @@ static void rig_engaged_cb(GtkToggleButton * button, gpointer data)
         gtk_widget_set_sensitive(ctrl->DevSel, FALSE);
         gtk_widget_set_sensitive(ctrl->DevSel2, FALSE);
         ctrl->engaged = TRUE;
+        if (ctrl->conf) {
+            ctrl->conf->getTXSupported = 3;
+            ctrl->conf->getRXSupported = 3;
+        }
+
+        if (ctrl->conf2) {
+            ctrl->conf2->getTXSupported = 3;
+            ctrl->conf2->getRXSupported = 3;
+        }
 
         /*  start worker thread... */
         ctrl->rigctlq = g_async_queue_new();
@@ -1528,22 +1537,25 @@ static inline gboolean check_set_response(gchar * buffback, gboolean retcode,
     return retcode;
 }
 
-static inline gboolean check_get_response(gchar * buffback, gboolean retcode,
-                                          const gchar * function)
+static inline HamLibResponse check_get_response(gchar * buffback, const gchar * function)
 {
-    if (retcode == TRUE)
+    if (strncmp(buffback, "RPRT -11", 4) == 0)
     {
-        if (strncmp(buffback, "RPRT", 4) == 0)
-        {
-            sat_log_log(SAT_LOG_LEVEL_ERROR,
-                        _("%s:%s: %s rigctld returned error (%s)"),
-                        __FILE__, __func__, function, buffback);
+        sat_log_log(SAT_LOG_LEVEL_ERROR,
+                    _("%s:%s: %s rigctld indicates get command not supported (%s)"),
+                    __FILE__, __func__, function, buffback);
 
-            retcode = FALSE;
-        }
+        return HLR_NOT_SUPPORTED;
+    } else if (strncmp(buffback, "RPRT", 4) == 0)
+    {
+        sat_log_log(SAT_LOG_LEVEL_ERROR,
+                    _("%s:%s: %s rigctld returned error (%s)"),
+                    __FILE__, __func__, function, buffback);
+
+        return HLR_ERROR;
     }
 
-    return retcode;
+    return HLR_SUCCESS;
 }
 
 // Sets up the RX mode dropdown selector with the modes supported by the radio.
@@ -1712,11 +1724,19 @@ static void exec_rx_cycle(GtkRigCtrl * ctrl)
      */
     if ((ctrl->engaged) && (ctrl->lastrxf > 0.0) && (ptt == FALSE))
     {
-        if (!get_freq_simplex(ctrl, ctrl->sock, &readfreq))
-        {
-            /* error => use a passive value */
-            ctrl->errcnt++;
+        if (ctrl->conf->getRXSupported) {
+            HamLibResponse result = get_freq_simplex(ctrl, ctrl->sock, &readfreq);
+
+            if (result == HLR_ERROR) {
+                /* error => use a passive value */
+                ctrl->errcnt++;
+                readfreq = ctrl->lastrxf;
+            } else if (result == HLR_NOT_SUPPORTED) {
+                /* Not supported => use a passive value */
+                readfreq = ctrl->lastrxf;
+            }
         }
+
         else if (fabs(readfreq - ctrl->lastrxf) >= 1.0)
         {
             /* user might have altered radio frequency => update transponder knob */
@@ -1789,8 +1809,14 @@ static void exec_rx_cycle(GtkRigCtrl * ctrl)
                the tuning step is larger than what we work with (e.g. FT-817 has a
                smallest tuning step of 10 Hz). Therefore we read back the actual
                frequency from the rig. */
-            get_freq_simplex(ctrl, ctrl->sock, &tmpfreq);
-            ctrl->lastrxf = tmpfreq;
+
+            if (ctrl->conf->getRXSupported) {
+                HamLibResponse result = get_freq_simplex(ctrl, ctrl->sock, &readfreq);
+
+                if (result == HLR_SUCCESS) {
+                    ctrl->lastrxf = readfreq;
+                }
+            }
 
             /* This is only effective in RIG_TYPE_TRX mode.
                Invalidate ctrl->lasttxf for two reasons.
@@ -2051,11 +2077,18 @@ static void exec_duplex_tx_cycle(GtkRigCtrl * ctrl)
      */
     if ((ctrl->engaged) && (ctrl->lasttxf > 0.0))
     {
-        if (!get_freq_toggle(ctrl, ctrl->sock, &readfreq))
-        {
-            /* error => use a passive value */
+        if (ctrl->conf->getTXSupported) {
+            HamLibResponse result = get_freq_toggle(ctrl, ctrl->sock, &readfreq);
+            if (result == HLR_ERROR) {
+                /* error => use a passive value */
+                readfreq = ctrl->lasttxf;
+                ctrl->errcnt++;
+            } else if (result == HLR_NOT_SUPPORTED) {
+                /* Not supported => use a passive value */
+                readfreq = ctrl->lasttxf;
+            }
+        } else {
             readfreq = ctrl->lasttxf;
-            ctrl->errcnt++;
         }
 
         if (fabs(readfreq - ctrl->lasttxf) >= 1.0)
@@ -2131,7 +2164,10 @@ static void exec_duplex_tx_cycle(GtkRigCtrl * ctrl)
                the tuning step is larger than what we work with (e.g. FT-817 has a
                smallest tuning step of 10 Hz). Therefore we read back the actual
                frequency from the rig. */
-            get_freq_toggle(ctrl, ctrl->sock, &tmpfreq);
+            if (ctrl->conf->getTXSupported) {
+                get_freq_toggle(ctrl, ctrl->sock, &tmpfreq);
+            }
+
             ctrl->lasttxf = tmpfreq;
         }
         else
@@ -2582,32 +2618,36 @@ static gboolean unset_toggle(GtkRigCtrl * ctrl, gint sock)
  *
  * Returns TRUE if the operation was successful, FALSE otherwise
  */
-static gboolean get_freq_simplex(GtkRigCtrl * ctrl, gint sock, gdouble * freq)
+static HamLibResponse get_freq_simplex(GtkRigCtrl * ctrl, gint sock, gdouble * freq)
 {
     gchar          *buff, **vbuff;
     gchar           buffback[128];
     gboolean        retcode;
-    gboolean        retval = TRUE;
+    HamLibResponse  response = HLR_ERROR;
 
     buff = g_strdup_printf("f\x0a");
     retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
-    retcode = check_get_response(buffback, retcode, __func__);
-    if (retcode)
-    {
-        vbuff = g_strsplit(buffback, "\n", 3);
-        if (vbuff[0])
-            *freq = g_ascii_strtod(vbuff[0], NULL);
-        else
-            retval = FALSE;
-        g_strfreev(vbuff);
-    }
-    else
-    {
-        retval = FALSE;
+
+    if (retcode) {
+        response = check_get_response(buffback, __func__);
+        switch (response) {
+            case HLR_NOT_SUPPORTED:
+                if (ctrl->conf->getRXSupported)
+                    ctrl->conf->getRXSupported--;
+                break;
+            case HLR_SUCCESS:
+                vbuff = g_strsplit(buffback, "\n", 3);
+                if (vbuff[0])
+                    *freq = g_ascii_strtod(vbuff[0], NULL);
+                else
+                    response = HLR_ERROR;
+                g_strfreev(vbuff);
+            default: ;
+        }
     }
 
     g_free(buff);
-    return retval;
+    return response;
 }
 
 /*
@@ -2689,41 +2729,36 @@ static GList *get_tx_modes(GtkRigCtrl * ctrl, gint sock)
  *
  * Returns TRUE if the operation was successful, FALSE otherwise
  */
-static gboolean get_freq_toggle(GtkRigCtrl * ctrl, gint sock, gdouble * freq)
+static HamLibResponse get_freq_toggle(GtkRigCtrl * ctrl, gint sock, gdouble * freq)
 {
     gchar          *buff, **vbuff;
     gchar           buffback[128];
     gboolean        retcode;
-    gboolean        retval = TRUE;
+    HamLibResponse  response = HLR_ERROR;
 
-    if (freq == NULL)
-    {
-        sat_log_log(SAT_LOG_LEVEL_ERROR,
-                    _("%s:%d: NULL storage."), __FILE__, __LINE__);
-        return FALSE;
-    }
-
-    /* send command */
     buff = g_strdup_printf("i\x0a");
     retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
-    retcode = check_get_response(buffback, retcode, __func__);
-    if (retcode)
-    {
-        vbuff = g_strsplit(buffback, "\n", 3);
-        if (vbuff[0])
-            *freq = g_ascii_strtod(vbuff[0], NULL);
-        else
-            retval = FALSE;
 
-        g_strfreev(vbuff);
-    }
-    else
-    {
-        retval = FALSE;
+    if (retcode) {
+        response = check_get_response(buffback, __func__);
+        switch (response) {
+            case HLR_NOT_SUPPORTED:
+                if (ctrl->conf->getTXSupported)
+                    ctrl->conf->getTXSupported--;
+                break;
+            case HLR_SUCCESS:
+                vbuff = g_strsplit(buffback, "\n", 3);
+                if (vbuff[0])
+                    *freq = g_ascii_strtod(vbuff[0], NULL);
+                else
+                    response = HLR_ERROR;
+                g_strfreev(vbuff);
+            default: ;
+        }
     }
 
     g_free(buff);
-    return retval;
+    return response;
 }
 
 /*

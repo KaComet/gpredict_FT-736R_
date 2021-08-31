@@ -73,6 +73,8 @@ typedef struct {
     guint           currentRXmode;  /*!< The current mode used for TX (index of modesRX) */
     gboolean        modeRXChanged; /*!< True if the TX mode has been changed. Set to false after the radio has been updated */
     gboolean        modeTXChanged; /*!< True if the TX mode has been changed. Set to false after the radio has been updated */
+    guint           getRXSupported; /*!< >0 if the radio supports getting the RX frequency via Hamlib. */
+    guint           getTXSupported; /*!< >0 if the radio supports getting the TX frequency via Hamlib. */
     vfo_t           vfoDown;    /*!< Downlink VFO for full-duplex radios */
     vfo_t           vfoUp;      /*!< Uplink VFO for full-duplex radios */
 
