@@ -1672,9 +1672,15 @@ static gboolean set_split_rx_mode(GtkRigCtrl * ctrl, gint sock)
     gchar           buffback[128];
     gboolean        retcode;
 
-    buff = g_strdup_printf("M %s 0\x0a", (gchar*) g_list_nth_data(ctrl->conf->modesRX, ctrl->conf->currentRXmode));
-    retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
-    g_free(buff);
+    if (g_list_length(ctrl->conf->modesRX))
+    {
+        buff = g_strdup_printf("M %s 0\x0a", (gchar*) g_list_nth_data(ctrl->conf->modesRX, ctrl->conf->currentRXmode));
+        retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
+        g_free(buff);
+    }
+    else {
+        return FALSE;
+    }
 
     return (check_set_response(buffback, retcode, __func__));
 }
