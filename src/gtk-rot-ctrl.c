@@ -1029,8 +1029,11 @@ static void delay_changed_cb(GtkSpinButton * spin, gpointer data)
     if (ctrl->conf)
         ctrl->conf->cycle = ctrl->delay;
 
-    if (ctrl->timerid > 0)
+    /* stop timer */
+    if (ctrl->timerid > 0) {
         g_source_remove(ctrl->timerid);
+        ctrl->timerid = 0;
+    }
 
     ctrl->timerid = g_timeout_add(ctrl->delay, rot_ctrl_timeout_cb, ctrl);
 }
@@ -1135,6 +1138,46 @@ static void rot_monitor_cb(GtkCheckButton * button, gpointer data)
     gtk_widget_set_sensitive(ctrl->track, !ctrl->monitor);
 }
 
+static void rot_end_rotctrld_thread(GtkRotCtrl *ctrl) {
+    gchar          *buff;
+    gchar           buffback[128];
+    gboolean        retcode;
+    gint            retval;
+
+    g_print("Ending rotctld client thread\n");
+
+    ctrl->engaged = FALSE;
+    gtk_widget_set_sensitive(ctrl->DevSel, TRUE);
+    gtk_label_set_text(GTK_LABEL(ctrl->AzRead), "---");
+    gtk_label_set_text(GTK_LABEL(ctrl->ElRead), "---");
+
+    if (!ctrl->client.running)
+        /* client thread is not running; nothing to do */
+        return;
+
+    /* stop moving rotor */
+    /** FIXME: should use high level func */
+    buff = g_strdup_printf("S\x0a");
+    retcode = rotctld_socket_rw(ctrl->client.socket, buff, buffback, 128);
+    g_free(buff);
+    if (retcode == TRUE)
+    {
+        /* treat errors as soft errors */
+        retval = (gint) g_strtod(buffback + 4, NULL);
+        if (retval != 0)
+        {
+            g_strstrip(buffback);
+            sat_log_log(SAT_LOG_LEVEL_ERROR,
+                        _
+                                ("%s:%d: rotctld returned error %d with stop-cmd (%s)"),
+                        __FILE__, __LINE__, retval, buffback);
+        }
+    }
+
+    ctrl->client.running = FALSE;
+    g_thread_join(ctrl->client.thread);
+}
+
 /**
  * Rotor locked.
  *
@@ -1146,43 +1189,10 @@ static void rot_monitor_cb(GtkCheckButton * button, gpointer data)
 static void rot_locked_cb(GtkToggleButton * button, gpointer data)
 {
     GtkRotCtrl     *ctrl = GTK_ROT_CTRL(data);
-    gchar          *buff;
-    gchar           buffback[128];
-    gboolean        retcode;
-    gint            retval;
 
     if (!gtk_toggle_button_get_active(button))
     {
-        ctrl->engaged = FALSE;
-        gtk_widget_set_sensitive(ctrl->DevSel, TRUE);
-        gtk_label_set_text(GTK_LABEL(ctrl->AzRead), "---");
-        gtk_label_set_text(GTK_LABEL(ctrl->ElRead), "---");
-
-        if (!ctrl->client.running)
-            /* client thread is not running; nothing to do */
-            return;
-
-        /* stop moving rotor */
-        /** FIXME: should use high level func */
-        buff = g_strdup_printf("S\x0a");
-        retcode = rotctld_socket_rw(ctrl->client.socket, buff, buffback, 128);
-        g_free(buff);
-        if (retcode == TRUE)
-        {
-            /* treat errors as soft errors */
-            retval = (gint) g_strtod(buffback + 4, NULL);
-            if (retval != 0)
-            {
-                g_strstrip(buffback);
-                sat_log_log(SAT_LOG_LEVEL_ERROR,
-                            _
-                            ("%s:%d: rotctld returned error %d with stop-cmd (%s)"),
-                            __FILE__, __LINE__, retval, buffback);
-            }
-        }
-
-        ctrl->client.running = FALSE;
-        g_thread_join(ctrl->client.thread);
+        rot_end_rotctrld_thread(ctrl);
     }
     else
     {
@@ -1196,8 +1206,7 @@ static void rot_locked_cb(GtkToggleButton * button, gpointer data)
             return;
         }
 
-        ctrl->client.thread =
-            g_thread_new("gpredict_rotctl", rotctld_client_thread, ctrl);
+        ctrl->client.thread = g_thread_new("gpredict_rotctl", rotctld_client_thread, ctrl);
 
         gtk_widget_set_sensitive(ctrl->DevSel, FALSE);
         ctrl->engaged = TRUE;
@@ -1561,9 +1570,14 @@ static void gtk_rot_ctrl_destroy(GtkWidget * widget)
 {
     GtkRotCtrl     *ctrl = GTK_ROT_CTRL(widget);
 
+    if (ctrl->engaged)
+        rot_end_rotctrld_thread(ctrl);
+
     /* stop timer */
-    if (ctrl->timerid > 0)
+    if (ctrl->timerid > 0) {
         g_source_remove(ctrl->timerid);
+        ctrl->timerid = 0;
+    }
 
     /* free configuration */
     if (ctrl->conf != NULL)
